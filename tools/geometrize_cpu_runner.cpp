@@ -12,7 +12,6 @@
 
 #include "geometrize/bitmap/bitmap.h"
 #include "geometrize/commonutil.h"
-#include "geometrize/exporter/bitmapexporter.h"
 #include "geometrize/exporter/shapejsonexporter.h"
 #include "geometrize/rasterizer/rasterizer.h"
 #include "geometrize/runner/imagerunner.h"
@@ -159,6 +158,69 @@ void write_text_file(const std::string& path, const std::string& data) {
     output.write(data.data(), static_cast<std::streamsize>(data.size()));
 }
 
+void write_u16(std::ofstream& output, const std::uint16_t value) {
+    const char bytes[2] = {
+        static_cast<char>(value & 0xffU),
+        static_cast<char>((value >> 8U) & 0xffU),
+    };
+    output.write(bytes, sizeof(bytes));
+}
+
+void write_u32(std::ofstream& output, const std::uint32_t value) {
+    const char bytes[4] = {
+        static_cast<char>(value & 0xffU),
+        static_cast<char>((value >> 8U) & 0xffU),
+        static_cast<char>((value >> 16U) & 0xffU),
+        static_cast<char>((value >> 24U) & 0xffU),
+    };
+    output.write(bytes, sizeof(bytes));
+}
+
+void write_bmp_file(const std::string& path, const geometrize::Bitmap& bitmap) {
+    std::ofstream output(path, std::ios::binary);
+    if(!output) {
+        throw std::runtime_error("failed to open output: " + path);
+    }
+
+    const std::uint32_t width = bitmap.getWidth();
+    const std::uint32_t height = bitmap.getHeight();
+    const std::uint32_t padding = ((width * 3U) % 4U != 0U) ? 4U - ((width * 3U) % 4U) : 0U;
+    const std::uint32_t stride = width * 3U + padding;
+    const std::uint32_t image_size = stride * height;
+    const std::uint32_t header_size = 14U + 40U;
+
+    write_u16(output, 19778U);
+    write_u32(output, header_size + image_size);
+    write_u16(output, 0U);
+    write_u16(output, 0U);
+    write_u32(output, header_size);
+
+    write_u32(output, 40U);
+    write_u32(output, width);
+    write_u32(output, height);
+    write_u16(output, 1U);
+    write_u16(output, 24U);
+    write_u32(output, 0U);
+    write_u32(output, image_size);
+    write_u32(output, 0U);
+    write_u32(output, 0U);
+    write_u32(output, 0U);
+    write_u32(output, 0U);
+
+    const char zero = 0;
+    for(std::int32_t y = static_cast<std::int32_t>(height) - 1; y >= 0; --y) {
+        for(std::uint32_t x = 0; x < width; ++x) {
+            const geometrize::rgba pixel = bitmap.getPixel(x, static_cast<std::uint32_t>(y));
+            output.put(static_cast<char>(pixel.b));
+            output.put(static_cast<char>(pixel.g));
+            output.put(static_cast<char>(pixel.r));
+        }
+        for(std::uint32_t pad = 0; pad < padding; ++pad) {
+            output.put(zero);
+        }
+    }
+}
+
 geometrize::Bitmap load_bmp_rgba(const std::string& path) {
     const std::vector<std::uint8_t> bytes = read_file(path);
     if(bytes.size() < 54 || bytes[0] != 'B' || bytes[1] != 'M') {
@@ -294,7 +356,7 @@ int main(int argc, char** argv) {
         const auto end = std::chrono::steady_clock::now();
         const double seconds = std::chrono::duration<double>(end - start).count();
 
-        write_text_file(args.output_bmp, geometrize::exporter::exportBMP(runner.getCurrent()));
+        write_bmp_file(args.output_bmp, runner.getCurrent());
         write_text_file(args.output_json, geometrize::exporter::exportShapeJson(shapes));
         std::cout << "triangles=" << shapes.size() << "\n";
         std::cout << "shape=" << args.shape << "\n";
